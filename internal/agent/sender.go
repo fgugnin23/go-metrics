@@ -9,9 +9,11 @@ func sendMetric(url, requestErrMsg, responseErrMsg string) {
 		panic(requestErrMsg)
 	}
 
-	_, responseErr := http.DefaultClient.Do(req)
+	request, responseErr := http.DefaultClient.Do(req)
 
 	if responseErr != nil {
 		panic(responseErrMsg)
 	}
+
+	defer request.Body.Close()
 }
