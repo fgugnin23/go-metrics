@@ -9,6 +9,10 @@ func NewRouter(storage Storage) *http.ServeMux {
 		"POST /update/{metric_type}/{metric_name}/{metric_value}",
 		NewUpdateMetricsHandle(storage),
 	)
+	mux.Handle(
+		"GET /value/{metric_type}/{metric_name}",
+		NewGetMetricsHandle(storage),
+	)
 
 	return mux
 }

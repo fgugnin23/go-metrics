@@ -35,6 +35,9 @@ func (s *mockStorage) SetCounterValue(name string, value int64) {
 	}{name, value})
 }
 
+func (s *mockStorage) GetGaugeValue(string) (float64, bool) { return 0, false }
+func (s *mockStorage) GetCounterValue(string) (int64, bool) { return 0, false }
+
 func do(t *testing.T, router http.Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -141,6 +144,68 @@ func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 	assert.Empty(t, storage.gaugeCalls)
+}
+
+func TestGetMetricsHandle(t *testing.T) {
+	storage := repository.NewMemStorage()
+	storage.SetGaugeValue("Fractional", 1.5)
+	storage.SetGaugeValue("Integral", 100)
+	storage.SetGaugeValue("Negative", -0.25)
+	storage.SetCounterValue("PollCount", 3)
+
+	router := NewRouter(storage)
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"дробный gauge", "/value/gauge/Fractional", http.StatusOK, "1.5"},
+		{"целый gauge без дробной части", "/value/gauge/Integral", http.StatusOK, "100"},
+		{"отрицательный gauge", "/value/gauge/Negative", http.StatusOK, "-0.25"},
+		{"counter", "/value/counter/PollCount", http.StatusOK, "3"},
+		{"неизвестное имя gauge", "/value/gauge/Unknown", http.StatusNotFound, ""},
+		{"неизвестное имя counter", "/value/counter/Unknown", http.StatusNotFound, ""},
+		{"неизвестный тип", "/value/unknown/Fractional", http.StatusBadRequest, ""},
+		{"нет имени метрики", "/value/gauge", http.StatusNotFound, ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := do(t, router, http.MethodGet, test.path)
+
+			require.Equal(t, test.wantStatus, recorder.Code)
+
+			if test.wantStatus != http.StatusOK {
+				return
+			}
+
+			assert.Equal(t, test.wantBody, recorder.Body.String())
+			assert.Equal(t, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
+		})
+	}
+}
+
+func TestGetMetricsHandle_WrongMethod(t *testing.T) {
+	router := NewRouter(repository.NewMemStorage())
+
+	recorder := do(t, router, http.MethodPost, "/value/gauge/Alloc")
+
+	assert.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
+}
+
+func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
+	handle := NewGetMetricsHandle(&mockStorage{})
+
+	request := httptest.NewRequest(http.MethodGet, "/value/gauge/", nil)
+	request.SetPathValue("metric_type", "gauge")
+	request.SetPathValue("metric_name", "")
+
+	recorder := httptest.NewRecorder()
+	handle.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 func TestNewRouter_UnknownPath(t *testing.T) {
