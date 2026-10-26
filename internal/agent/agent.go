@@ -9,6 +9,7 @@ import (
 type agentState struct {
 	gauges      []GaugeMetric
 	pollCount   CounterMetric
+	totalPolls  int64
 	randomValue GaugeMetric
 }
 
@@ -20,16 +21,15 @@ func newAgentState() agentState {
 	}
 }
 
-func (s agentState) poll() agentState {
+func (s *agentState) poll() {
 	s.pollCount.value += 1
+	s.totalPolls += 1
 	s.randomValue.value = rand.NormFloat64()
 
 	collectRuntimeMetrics(s.gauges)
-
-	return s
 }
 
-func (s agentState) report(client http.Client, cfg Config) []error {
+func (s *agentState) report(client http.Client, cfg Config) []error {
 	var errs []error
 
 	for _, gaugeMetric := range s.gauges {
@@ -40,6 +40,8 @@ func (s agentState) report(client http.Client, cfg Config) []error {
 
 	if err := sendMetric(client, counterURL(cfg.ServerBaseURL, s.pollCount)); err != nil {
 		errs = append(errs, err)
+	} else {
+		s.pollCount.value = 0
 	}
 
 	if err := sendMetric(client, gaugeURL(cfg.ServerBaseURL, s.randomValue)); err != nil {
@@ -71,14 +73,14 @@ func RunWithConfig(cfg Config) {
 	client := http.Client{}
 
 	for {
-		state = state.poll()
+		state.poll()
 
-		if shouldReport(state.pollCount.value, cfg) {
+		if shouldReport(state.totalPolls, cfg) {
 			for _, err := range state.report(client, cfg) {
 				println("Ошибка при отправке метрик: ", err.Error())
 			}
 
-			println("Метрики отправлены на сервер, опрос произошел: ", state.pollCount.value, " раз")
+			println("Метрики отправлены на сервер, опрос произошел: ", state.totalPolls, " раз")
 		}
 
 		time.Sleep(cfg.PollInterval)

@@ -3,6 +3,7 @@ package agent
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,18 +25,20 @@ func TestNewAgentState(t *testing.T) {
 func TestAgentState_Poll(t *testing.T) {
 	state := newAgentState()
 
-	state = state.poll()
+	state.poll()
 
 	assert.Equal(t, int64(1), state.pollCount.value)
+	assert.Equal(t, int64(1), state.totalPolls)
 	assert.NotZero(t, state.randomValue.value)
 
 	alloc, ok := findGauge(state.gauges, "Alloc")
 	require.True(t, ok)
 	assert.Positive(t, alloc, "poll должен заполнять runtime-метрики")
 
-	state = state.poll()
+	state.poll()
 
 	assert.Equal(t, int64(2), state.pollCount.value)
+	assert.Equal(t, int64(2), state.totalPolls)
 }
 
 func TestShouldReport(t *testing.T) {
@@ -82,7 +85,7 @@ func TestAgentState_Report_SendsAllMetrics(t *testing.T) {
 	defer server.Close()
 
 	state := newAgentState()
-	state = state.poll()
+	state.poll()
 
 	cfg := Config{ServerBaseURL: server.URL, PollInterval: 2 * time.Second, ReportInterval: 10 * time.Second}
 	errs := state.report(*server.Client(), cfg)
@@ -104,6 +107,67 @@ func TestAgentState_Report_SendsAllMetrics(t *testing.T) {
 	for _, gauge := range state.gauges {
 		assert.Contains(t, joined, "/update/gauge/"+gauge.name+"/")
 	}
+}
+
+func TestAgentState_Report_ResetsPollCountDelta(t *testing.T) {
+	rec := &recorder{}
+	server := httptest.NewServer(rec)
+	defer server.Close()
+
+	state := newAgentState()
+	state.poll()
+	state.poll()
+
+	require.Empty(t, state.report(*server.Client(), Config{ServerBaseURL: server.URL}))
+
+	assert.Zero(t, state.pollCount.value, "после успешной отправки приращение сбрасывается")
+	assert.Equal(t, int64(2), state.totalPolls, "общее число опросов не сбрасывается")
+	assert.Equal(t, []int64{2}, pollCountValues(rec))
+}
+
+func TestAgentState_Report_KeepsPollCountDeltaOnError(t *testing.T) {
+	failing := httptest.NewServer(&recorder{status: http.StatusInternalServerError})
+	defer failing.Close()
+
+	state := newAgentState()
+	state.poll()
+
+	require.NotEmpty(t, state.report(*failing.Client(), Config{ServerBaseURL: failing.URL}))
+	assert.Equal(t, int64(1), state.pollCount.value, "недоставленное приращение сохраняется")
+
+	rec := &recorder{}
+	server := httptest.NewServer(rec)
+	defer server.Close()
+
+	state.poll()
+	require.Empty(t, state.report(*server.Client(), Config{ServerBaseURL: server.URL}))
+
+	assert.Equal(t, []int64{2}, pollCountValues(rec), "приращение уходит целиком следующей отправкой")
+}
+
+func TestAgentState_PollCountSumMatchesTotalPolls(t *testing.T) {
+	rec := &recorder{}
+	server := httptest.NewServer(rec)
+	defer server.Close()
+
+	cfg := Config{ServerBaseURL: server.URL, PollInterval: 2 * time.Second, ReportInterval: 10 * time.Second}
+	state := newAgentState()
+
+	for poll := 0; poll < 20; poll++ {
+		state.poll()
+
+		if shouldReport(state.totalPolls, cfg) {
+			require.Empty(t, state.report(*server.Client(), cfg))
+		}
+	}
+
+	var sum int64
+	for _, value := range pollCountValues(rec) {
+		sum += value
+	}
+
+	assert.Equal(t, int64(20), state.totalPolls)
+	assert.Equal(t, int64(20), sum, "сумма приращений на сервере равна числу опросов")
 }
 
 func TestAgentState_Report_CollectsErrors(t *testing.T) {
@@ -138,6 +202,28 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 2*time.Second, cfg.PollInterval)
 	assert.Equal(t, 10*time.Second, cfg.ReportInterval)
 	assert.Equal(t, "http://localhost:8080", cfg.ServerBaseURL)
+}
+
+func pollCountValues(rec *recorder) []int64 {
+	_, paths := rec.snapshot()
+
+	var values []int64
+
+	for _, path := range paths {
+		raw, isPollCount := strings.CutPrefix(path, "/update/counter/PollCount/")
+		if !isPollCount {
+			continue
+		}
+
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		values = append(values, value)
+	}
+
+	return values
 }
 
 func findGauge(gauges []GaugeMetric, name string) (float64, bool) {
