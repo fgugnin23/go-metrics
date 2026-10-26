@@ -21,7 +21,7 @@ func sendMetric(client http.Client, url string) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("Запрос на адрес %s: неожиданный статус %d", url, resp.StatusCode)
+		return fmt.Errorf("запрос на адрес %s: неожиданный статус %d", url, resp.StatusCode)
 	}
 
 	return nil
