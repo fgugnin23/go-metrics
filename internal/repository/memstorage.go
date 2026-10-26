@@ -29,3 +29,11 @@ func (storage MemStorage) GetCounterValue(name string) (int64, bool) {
 	value, ok := storage.counterMetrics[name]
 	return value, ok
 }
+
+func (storage MemStorage) GetGaugeMetrics() map[string]float64 {
+	return storage.gaugeMetrics
+}
+
+func (storage MemStorage) GetCounterMetrics() map[string]int64 {
+	return storage.counterMetrics
+}

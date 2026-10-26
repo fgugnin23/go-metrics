@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"net/http"
 	"strconv"
 
@@ -14,6 +15,8 @@ type Storage interface {
 	SetCounterValue(name string, value int64)
 	GetGaugeValue(name string) (float64, bool)
 	GetCounterValue(name string) (int64, bool)
+	GetGaugeMetrics() map[string]float64
+	GetCounterMetrics() map[string]int64
 }
 
 type MetricsHandler struct {
@@ -22,6 +25,19 @@ type MetricsHandler struct {
 
 func NewMetricsHandler(storage Storage) MetricsHandler {
 	return MetricsHandler{storage: storage}
+}
+
+func (handler MetricsHandler) MainPage(w http.ResponseWriter, _ *http.Request) {
+	var page bytes.Buffer
+
+	if err := renderMetricsPage(&page, newMetricsPageData(handler.storage)); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(page.Bytes())
 }
 
 func (handler MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {

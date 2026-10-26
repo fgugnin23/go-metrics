@@ -40,6 +40,8 @@ func (s *mockStorage) SetCounterValue(name string, value int64) {
 
 func (s *mockStorage) GetGaugeValue(string) (float64, bool) { return 0, false }
 func (s *mockStorage) GetCounterValue(string) (int64, bool) { return 0, false }
+func (s *mockStorage) GetGaugeMetrics() map[string]float64  { return nil }
+func (s *mockStorage) GetCounterMetrics() map[string]int64  { return nil }
 
 func do(t *testing.T, router http.Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -219,6 +221,36 @@ func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 	handle.Get(recorder, request)
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestMainPage(t *testing.T) {
+	storage := repository.NewMemStorage()
+	router := NewRouter(storage)
+
+	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5").Code)
+	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/3").Code)
+
+	recorder := do(t, router, http.MethodGet, "/")
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "text/html; charset=utf-8", recorder.Header().Get("Content-Type"))
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, "<li><b>Alloc: </b>1.5</li>")
+	assert.Contains(t, body, "<li><b>PollCount: </b>3</li>")
+}
+
+func TestMainPage_EmptyStorage(t *testing.T) {
+	recorder := do(t, NewRouter(repository.NewMemStorage()), http.MethodGet, "/")
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "<h1>Список всех метрик</h1>")
+}
+
+func TestMainPage_WrongMethod(t *testing.T) {
+	recorder := do(t, NewRouter(repository.NewMemStorage()), http.MethodPost, "/")
+
+	assert.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
 }
 
 func TestNewRouter_UnknownPath(t *testing.T) {

@@ -13,6 +13,7 @@ func NewRouter(storage Storage) *chi.Mux {
 
 	router.Post("/update/{metric_type}/{metric_name}/{metric_value}", metrics.Update)
 	router.Get("/value/{metric_type}/{metric_name}", metrics.Get)
+	router.Get("/", metrics.MainPage)
 
 	return router
 }
