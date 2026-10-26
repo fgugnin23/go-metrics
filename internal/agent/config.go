@@ -1,7 +1,17 @@
 package agent
 
-const (
-	pollInterval   = 2
-	reportInterval = 10
-	serverBaseURL  = "http://localhost:8080"
-)
+import "time"
+
+type Config struct {
+	PollInterval   time.Duration
+	ReportInterval time.Duration
+	ServerBaseURL  string
+}
+
+func DefaultConfig() Config {
+	return Config{
+		PollInterval:   2 * time.Second,
+		ReportInterval: 10 * time.Second,
+		ServerBaseURL:  "http://localhost:8080",
+	}
+}

@@ -1,19 +1,28 @@
 package agent
 
-import "net/http"
+import (
+	"fmt"
+	"io"
+	"net/http"
+)
 
-func sendMetric(url, requestErrMsg, responseErrMsg string) {
-	req, requestErr := http.NewRequest(http.MethodPost, url, nil)
-
-	if requestErr != nil {
-		panic(requestErrMsg)
+func sendMetric(client http.Client, url string) error {
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("build request %s: %w", url, err)
 	}
 
-	request, responseErr := http.DefaultClient.Do(req)
-
-	if responseErr != nil {
-		panic(responseErrMsg)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request %s: %w", url, err)
 	}
 
-	defer request.Body.Close()
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("Запрос на адрес %s: неожиданный статус %d", url, resp.StatusCode)
+	}
+
+	return nil
 }
