@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
 	models "github.com/fgugnin23/go-metrics/internal/model"
 )
 
@@ -14,26 +16,18 @@ type Storage interface {
 	GetCounterValue(name string) (int64, bool)
 }
 
-type UpdateMetricsHandle struct {
+type MetricsHandler struct {
 	storage Storage
 }
 
-func NewUpdateMetricsHandle(storage Storage) UpdateMetricsHandle {
-	return UpdateMetricsHandle{storage: storage}
+func NewMetricsHandler(storage Storage) MetricsHandler {
+	return MetricsHandler{storage: storage}
 }
 
-type GetMetricsHandle struct {
-	storage Storage
-}
-
-func NewGetMetricsHandle(storage Storage) GetMetricsHandle {
-	return GetMetricsHandle{storage: storage}
-}
-
-func (handle UpdateMetricsHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	metricType := r.PathValue("metric_type")
-	metricName := r.PathValue("metric_name")
-	rawMetricValue := r.PathValue("metric_value")
+func (handler MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
+	metricType := chi.URLParam(r, "metric_type")
+	metricName := chi.URLParam(r, "metric_name")
+	rawMetricValue := chi.URLParam(r, "metric_value")
 
 	if metricType != models.Gauge && metricType != models.Counter {
 		w.WriteHeader(http.StatusBadRequest)
@@ -52,20 +46,20 @@ func (handle UpdateMetricsHandle) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		handle.storage.SetGaugeValue(metricName, value)
+		handler.storage.SetGaugeValue(metricName, value)
 	case models.Counter:
 		value, err := strconv.ParseInt(rawMetricValue, 10, 64)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		handle.storage.SetCounterValue(metricName, value)
+		handler.storage.SetCounterValue(metricName, value)
 	}
 }
 
-func (handle GetMetricsHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	metricType := r.PathValue("metric_type")
-	metricName := r.PathValue("metric_name")
+func (handler MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
+	metricType := chi.URLParam(r, "metric_type")
+	metricName := chi.URLParam(r, "metric_name")
 
 	if metricType != models.Gauge && metricType != models.Counter {
 		w.WriteHeader(http.StatusBadRequest)
@@ -81,14 +75,14 @@ func (handle GetMetricsHandle) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	switch metricType {
 	case models.Gauge:
-		value, ok := handle.storage.GetGaugeValue(metricName)
+		value, ok := handler.storage.GetGaugeValue(metricName)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		body = strconv.FormatFloat(value, 'f', -1, 64)
 	case models.Counter:
-		value, ok := handle.storage.GetCounterValue(metricName)
+		value, ok := handler.storage.GetCounterValue(metricName)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return

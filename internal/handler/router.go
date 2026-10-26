@@ -1,18 +1,18 @@
 package handler
 
-import "net/http"
+import (
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
 
-func NewRouter(storage Storage) *http.ServeMux {
-	mux := http.NewServeMux()
+func NewRouter(storage Storage) *chi.Mux {
+	metrics := NewMetricsHandler(storage)
 
-	mux.Handle(
-		"POST /update/{metric_type}/{metric_name}/{metric_value}",
-		NewUpdateMetricsHandle(storage),
-	)
-	mux.Handle(
-		"GET /value/{metric_type}/{metric_name}",
-		NewGetMetricsHandle(storage),
-	)
+	router := chi.NewRouter()
+	router.Use(middleware.Logger, middleware.Recoverer)
 
-	return mux
+	router.Post("/update/{metric_type}/{metric_name}/{metric_value}", metrics.Update)
+	router.Get("/value/{metric_type}/{metric_name}", metrics.Get)
+
+	return router
 }

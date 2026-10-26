@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/fgugnin23/go-metrics/internal/repository"
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/fgugnin23/go-metrics/internal/repository"
 )
 
 type mockStorage struct {
@@ -45,6 +48,15 @@ func do(t *testing.T, router http.Handler, method, path string) *httptest.Respon
 	router.ServeHTTP(recorder, httptest.NewRequest(method, path, nil))
 
 	return recorder
+}
+
+func withURLParams(r *http.Request, params map[string]string) *http.Request {
+	routeContext := chi.NewRouteContext()
+	for name, value := range params {
+		routeContext.URLParams.Add(name, value)
+	}
+
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeContext))
 }
 
 func TestUpdateMetricsHandle_StatusCodes(t *testing.T) {
@@ -132,15 +144,15 @@ func TestUpdateMetricsHandle_DoesNotWriteOnInvalidInput(t *testing.T) {
 
 func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 	storage := &mockStorage{}
-	handle := NewUpdateMetricsHandle(storage)
+	handle := NewMetricsHandler(storage)
 
-	request := httptest.NewRequest(http.MethodPost, "/update/gauge//1", nil)
-	request.SetPathValue("metric_type", "gauge")
-	request.SetPathValue("metric_name", "")
-	request.SetPathValue("metric_value", "1")
+	request := withURLParams(
+		httptest.NewRequest(http.MethodPost, "/update/gauge//1", nil),
+		map[string]string{"metric_type": "gauge", "metric_name": "", "metric_value": "1"},
+	)
 
 	recorder := httptest.NewRecorder()
-	handle.ServeHTTP(recorder, request)
+	handle.Update(recorder, request)
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 	assert.Empty(t, storage.gaugeCalls)
@@ -196,14 +208,15 @@ func TestGetMetricsHandle_WrongMethod(t *testing.T) {
 }
 
 func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
-	handle := NewGetMetricsHandle(&mockStorage{})
+	handle := NewMetricsHandler(&mockStorage{})
 
-	request := httptest.NewRequest(http.MethodGet, "/value/gauge/", nil)
-	request.SetPathValue("metric_type", "gauge")
-	request.SetPathValue("metric_name", "")
+	request := withURLParams(
+		httptest.NewRequest(http.MethodGet, "/value/gauge/", nil),
+		map[string]string{"metric_type": "gauge", "metric_name": ""},
+	)
 
 	recorder := httptest.NewRecorder()
-	handle.ServeHTTP(recorder, request)
+	handle.Get(recorder, request)
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
