@@ -65,7 +65,7 @@ func shouldReport(pollCount int64, cfg Config) bool {
 }
 
 func Run() {
-	RunWithConfig(DefaultConfig())
+	RunWithConfig(ArgsConfig())
 }
 
 func RunWithConfig(cfg Config) {
