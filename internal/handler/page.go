@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"cmp"
 	"html/template"
 	"io"
-	"maps"
 	"slices"
 	"strconv"
+
+	models "github.com/fgugnin23/go-metrics/internal/model"
 )
 
 const metricsPageTemplate = `<!DOCTYPE html>
@@ -37,28 +39,25 @@ type metricsPageData struct {
 	Counters []metricRow
 }
 
-func newMetricsPageData(storage Storage) metricsPageData {
-	gaugeMetrics := storage.GetGaugeMetrics()
-	counterMetrics := storage.GetCounterMetrics()
-
-	data := metricsPageData{
-		Gauges:   make([]metricRow, 0, len(gaugeMetrics)),
-		Counters: make([]metricRow, 0, len(counterMetrics)),
+func newMetricsPageData(metrics []models.Metrics) metricsPageData {
+	var data metricsPageData
+	for _, metric := range metrics {
+		switch metric.MType {
+		case models.Gauge:
+			data.Gauges = append(data.Gauges, metricRow{
+				Name:  metric.ID,
+				Value: strconv.FormatFloat(*metric.Value, 'f', -1, 64),
+			})
+		case models.Counter:
+			data.Counters = append(data.Counters, metricRow{
+				Name:  metric.ID,
+				Value: strconv.FormatInt(*metric.Delta, 10),
+			})
+		}
 	}
-
-	for _, name := range slices.Sorted(maps.Keys(gaugeMetrics)) {
-		data.Gauges = append(data.Gauges, metricRow{
-			Name:  name,
-			Value: strconv.FormatFloat(gaugeMetrics[name], 'f', -1, 64),
-		})
-	}
-
-	for _, name := range slices.Sorted(maps.Keys(counterMetrics)) {
-		data.Counters = append(data.Counters, metricRow{
-			Name:  name,
-			Value: strconv.FormatInt(counterMetrics[name], 10),
-		})
-	}
+	sortByName := func(a, b metricRow) int { return cmp.Compare(a.Name, b.Name) }
+	slices.SortFunc(data.Gauges, sortByName)
+	slices.SortFunc(data.Counters, sortByName)
 
 	return data
 }

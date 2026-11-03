@@ -2,9 +2,17 @@ package config
 
 import "flag"
 
-var FlagRunAddr string
+type Config struct {
+	RunAddr string
+}
 
-func ParseFlags() {
-	flag.StringVar(&FlagRunAddr, "a", "localhost:8080", "address and port to run server")
-	flag.Parse()
+func ParseFlags(args []string) (Config, error) {
+	var cfg Config
+	flags := flag.NewFlagSet("server", flag.ContinueOnError)
+	flags.StringVar(&cfg.RunAddr, "a", "localhost:8080", "address and port to run server")
+	if err := flags.Parse(args); err != nil {
+		return Config{}, err
+	}
+
+	return cfg, nil
 }

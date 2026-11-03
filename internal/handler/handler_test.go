@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,38 +12,41 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	models "github.com/fgugnin23/go-metrics/internal/model"
 	"github.com/fgugnin23/go-metrics/internal/repository"
+	"github.com/fgugnin23/go-metrics/internal/service"
 )
 
-type mockStorage struct {
-	gaugeCalls []struct {
-		name  string
-		value float64
+type mockService struct {
+	updateCalls []models.Metrics
+	updateErr   error
+	getCalls    []struct {
+		metricType string
+		name       string
 	}
-	counterCalls []struct {
-		name  string
-		value int64
-	}
+	getResult models.Metrics
+	getErr    error
+	metrics   []models.Metrics
+	listCalls int
 }
 
-func (s *mockStorage) SetGaugeValue(name string, value float64) {
-	s.gaugeCalls = append(s.gaugeCalls, struct {
-		name  string
-		value float64
-	}{name, value})
+func (s *mockService) UpdateMetric(metric models.Metrics) error {
+	s.updateCalls = append(s.updateCalls, metric)
+	return s.updateErr
 }
 
-func (s *mockStorage) SetCounterValue(name string, value int64) {
-	s.counterCalls = append(s.counterCalls, struct {
-		name  string
-		value int64
-	}{name, value})
+func (s *mockService) GetMetric(metricType, name string) (models.Metrics, error) {
+	s.getCalls = append(s.getCalls, struct {
+		metricType string
+		name       string
+	}{metricType, name})
+	return s.getResult, s.getErr
 }
 
-func (s *mockStorage) GetGaugeValue(string) (float64, bool) { return 0, false }
-func (s *mockStorage) GetCounterValue(string) (int64, bool) { return 0, false }
-func (s *mockStorage) GetGaugeMetrics() map[string]float64  { return nil }
-func (s *mockStorage) GetCounterMetrics() map[string]int64  { return nil }
+func (s *mockService) ListMetrics() []models.Metrics {
+	s.listCalls++
+	return s.metrics
+}
 
 func do(t *testing.T, router http.Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -83,7 +88,7 @@ func TestUpdateMetricsHandle_StatusCodes(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			router := NewRouter(repository.NewMemStorage())
+			router := NewRouter(service.NewMetricsService(repository.NewMemStorage()))
 
 			recorder := do(t, router, test.method, test.path)
 
@@ -94,7 +99,7 @@ func TestUpdateMetricsHandle_StatusCodes(t *testing.T) {
 
 func TestUpdateMetricsHandle_StoresValues(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(storage)
+	router := NewRouter(service.NewMetricsService(storage))
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5").Code)
 
@@ -111,7 +116,7 @@ func TestUpdateMetricsHandle_StoresValues(t *testing.T) {
 
 func TestUpdateMetricsHandle_CounterAccumulates(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(storage)
+	router := NewRouter(service.NewMetricsService(storage))
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/2").Code)
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/2").Code)
@@ -121,32 +126,31 @@ func TestUpdateMetricsHandle_CounterAccumulates(t *testing.T) {
 	assert.Equal(t, int64(4), counter)
 }
 
-func TestUpdateMetricsHandle_DoesNotWriteOnInvalidInput(t *testing.T) {
+func TestUpdateMetricsHandle_DoesNotCallServiceOnInvalidValue(t *testing.T) {
 	tests := []struct {
 		name string
 		path string
 	}{
 		{"нечисловой gauge", "/update/gauge/X/abc"},
 		{"дробный counter", "/update/counter/X/1.5"},
-		{"неизвестный тип", "/update/unknown/X/1"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			storage := &mockStorage{}
-			router := NewRouter(storage)
+			metrics := &mockService{}
+			router := NewRouter(metrics)
 
-			do(t, router, http.MethodPost, test.path)
+			recorder := do(t, router, http.MethodPost, test.path)
 
-			assert.Empty(t, storage.gaugeCalls)
-			assert.Empty(t, storage.counterCalls)
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.Empty(t, metrics.updateCalls)
 		})
 	}
 }
 
 func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
-	storage := &mockStorage{}
-	handle := NewMetricsHandler(storage)
+	metrics := &mockService{updateErr: models.ErrInvalidMetricName}
+	handle := NewMetricsHandler(metrics)
 
 	request := withURLParams(
 		httptest.NewRequest(http.MethodPost, "/update/gauge//1", nil),
@@ -157,7 +161,15 @@ func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 	handle.Update(recorder, request)
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
-	assert.Empty(t, storage.gaugeCalls)
+	assert.Equal(t, []models.Metrics{testGauge("", 1)}, metrics.updateCalls)
+}
+
+func TestUpdateMetricsHandle_UnknownTypeIsBadRequest(t *testing.T) {
+	metrics := &mockService{updateErr: models.ErrInvalidMetricType}
+	recorder := do(t, NewRouter(metrics), http.MethodPost, "/update/unknown/X/1")
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.Equal(t, []models.Metrics{{ID: "X", MType: "unknown"}}, metrics.updateCalls)
 }
 
 func TestGetMetricsHandle(t *testing.T) {
@@ -167,7 +179,7 @@ func TestGetMetricsHandle(t *testing.T) {
 	storage.SetGaugeValue("Negative", -0.25)
 	storage.SetCounterValue("PollCount", 3)
 
-	router := NewRouter(storage)
+	router := NewRouter(service.NewMetricsService(storage))
 
 	tests := []struct {
 		name       string
@@ -202,7 +214,7 @@ func TestGetMetricsHandle(t *testing.T) {
 }
 
 func TestGetMetricsHandle_WrongMethod(t *testing.T) {
-	router := NewRouter(repository.NewMemStorage())
+	router := NewRouter(service.NewMetricsService(repository.NewMemStorage()))
 
 	recorder := do(t, router, http.MethodPost, "/value/gauge/Alloc")
 
@@ -210,7 +222,7 @@ func TestGetMetricsHandle_WrongMethod(t *testing.T) {
 }
 
 func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
-	handle := NewMetricsHandler(&mockStorage{})
+	handle := NewMetricsHandler(&mockService{getErr: models.ErrInvalidMetricName})
 
 	request := withURLParams(
 		httptest.NewRequest(http.MethodGet, "/value/gauge/", nil),
@@ -225,7 +237,7 @@ func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 
 func TestMainPage(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(storage)
+	router := NewRouter(service.NewMetricsService(storage))
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5").Code)
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/3").Code)
@@ -241,20 +253,73 @@ func TestMainPage(t *testing.T) {
 }
 
 func TestMainPage_EmptyStorage(t *testing.T) {
-	recorder := do(t, NewRouter(repository.NewMemStorage()), http.MethodGet, "/")
+	recorder := do(t, NewRouter(&mockService{}), http.MethodGet, "/")
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "<h1>Список всех метрик</h1>")
 }
 
 func TestMainPage_WrongMethod(t *testing.T) {
-	recorder := do(t, NewRouter(repository.NewMemStorage()), http.MethodPost, "/")
+	recorder := do(t, NewRouter(&mockService{}), http.MethodPost, "/")
 
 	assert.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
 }
 
 func TestNewRouter_UnknownPath(t *testing.T) {
-	router := NewRouter(repository.NewMemStorage())
+	router := NewRouter(&mockService{})
 
 	assert.Equal(t, http.StatusNotFound, do(t, router, http.MethodGet, "/unknown").Code)
+}
+
+func TestUpdateMetricsHandle_ForwardsMetric(t *testing.T) {
+	tests := []struct {
+		path string
+		want models.Metrics
+	}{
+		{path: "/update/gauge/Alloc/1.5", want: testGauge("Alloc", 1.5)},
+		{path: "/update/counter/PollCount/2", want: testCounter("PollCount", 2)},
+		{path: "/update/gauge/Alloc/0", want: testGauge("Alloc", 0)},
+		{path: "/update/counter/PollCount/0", want: testCounter("PollCount", 0)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			metrics := &mockService{}
+			recorder := do(t, NewRouter(metrics), http.MethodPost, test.path)
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Equal(t, []models.Metrics{test.want}, metrics.updateCalls)
+		})
+	}
+}
+
+func TestMetricsHandler_ServiceErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "invalid type", err: models.ErrInvalidMetricType, status: http.StatusBadRequest},
+		{name: "invalid value", err: models.ErrInvalidMetricValue, status: http.StatusBadRequest},
+		{name: "empty name", err: models.ErrInvalidMetricName, status: http.StatusNotFound},
+		{name: "not found", err: models.ErrMetricNotFound, status: http.StatusNotFound},
+		{name: "wrapped error", err: fmt.Errorf("lookup: %w", models.ErrMetricNotFound), status: http.StatusNotFound},
+		{name: "unexpected error", err: errors.New("internal failure"), status: http.StatusInternalServerError},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			metrics := &mockService{updateErr: test.err, getErr: test.err}
+			router := NewRouter(metrics)
+			update := do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5")
+			get := do(t, router, http.MethodGet, "/value/gauge/Alloc")
+
+			assert.Equal(t, test.status, update.Code)
+			assert.Equal(t, test.status, get.Code)
+			assert.Empty(t, update.Body.String())
+			assert.Empty(t, get.Body.String())
+			assert.Len(t, metrics.updateCalls, 1)
+			assert.Len(t, metrics.getCalls, 1)
+		})
+	}
 }

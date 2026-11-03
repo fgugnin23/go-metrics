@@ -5,8 +5,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(storage Storage) *chi.Mux {
-	metrics := NewMetricsHandler(storage)
+func NewRouter(service MetricsService) *chi.Mux {
+	metrics := NewMetricsHandler(service)
 
 	router := chi.NewRouter()
 	router.Use(middleware.Logger, middleware.Recoverer)

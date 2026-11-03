@@ -7,31 +7,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fgugnin23/go-metrics/internal/repository"
+	models "github.com/fgugnin23/go-metrics/internal/model"
 )
 
 func TestNewMetricsPageData_SortsByName(t *testing.T) {
-	storage := repository.NewMemStorage()
-	storage.SetGaugeValue("Sys", 3)
-	storage.SetGaugeValue("Alloc", 1)
-	storage.SetGaugeValue("HeapSys", 2)
-	storage.SetCounterValue("PollCount", 1)
-	storage.SetCounterValue("Errors", 2)
-
-	data := newMetricsPageData(storage)
+	data := newMetricsPageData([]models.Metrics{
+		testGauge("Sys", 3),
+		testGauge("Alloc", 1),
+		testGauge("HeapSys", 2),
+		testCounter("PollCount", 1),
+		testCounter("Errors", 2),
+	})
 
 	assert.Equal(t, []string{"Alloc", "HeapSys", "Sys"}, rowNames(data.Gauges))
 	assert.Equal(t, []string{"Errors", "PollCount"}, rowNames(data.Counters))
 }
 
 func TestNewMetricsPageData_FormatsValues(t *testing.T) {
-	storage := repository.NewMemStorage()
-	storage.SetGaugeValue("Fractional", 1.5)
-	storage.SetGaugeValue("Integral", 100)
-	storage.SetGaugeValue("Negative", -0.25)
-	storage.SetCounterValue("PollCount", 3)
-
-	data := newMetricsPageData(storage)
+	data := newMetricsPageData([]models.Metrics{
+		testGauge("Fractional", 1.5),
+		testGauge("Integral", 100),
+		testGauge("Negative", -0.25),
+		testCounter("PollCount", 3),
+	})
 
 	require.Len(t, data.Gauges, 3)
 	assert.Equal(t, metricRow{Name: "Fractional", Value: "1.5"}, data.Gauges[0])
@@ -43,19 +41,17 @@ func TestNewMetricsPageData_FormatsValues(t *testing.T) {
 }
 
 func TestNewMetricsPageData_EmptyStorage(t *testing.T) {
-	data := newMetricsPageData(repository.NewMemStorage())
+	data := newMetricsPageData(nil)
 
 	assert.Empty(t, data.Gauges)
 	assert.Empty(t, data.Counters)
 }
 
 func TestRenderMetricsPage(t *testing.T) {
-	storage := repository.NewMemStorage()
-	storage.SetGaugeValue("Alloc", 1.5)
-	storage.SetCounterValue("PollCount", 3)
+	metrics := []models.Metrics{testGauge("Alloc", 1.5), testCounter("PollCount", 3)}
 
 	var page strings.Builder
-	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(storage)))
+	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(metrics)))
 
 	body := page.String()
 
@@ -67,7 +63,7 @@ func TestRenderMetricsPage(t *testing.T) {
 
 func TestRenderMetricsPage_EmptyStorage(t *testing.T) {
 	var page strings.Builder
-	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(repository.NewMemStorage())))
+	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(nil)))
 
 	body := page.String()
 
@@ -77,11 +73,10 @@ func TestRenderMetricsPage_EmptyStorage(t *testing.T) {
 }
 
 func TestRenderMetricsPage_EscapesMetricName(t *testing.T) {
-	storage := repository.NewMemStorage()
-	storage.SetGaugeValue("<script>alert(1)</script>", 1)
+	metrics := []models.Metrics{testGauge("<script>alert(1)</script>", 1)}
 
 	var page strings.Builder
-	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(storage)))
+	require.NoError(t, renderMetricsPage(&page, newMetricsPageData(metrics)))
 
 	body := page.String()
 
@@ -97,4 +92,12 @@ func rowNames(rows []metricRow) []string {
 	}
 
 	return names
+}
+
+func testGauge(name string, value float64) models.Metrics {
+	return models.Metrics{ID: name, MType: models.Gauge, Value: &value}
+}
+
+func testCounter(name string, value int64) models.Metrics {
+	return models.Metrics{ID: name, MType: models.Counter, Delta: &value}
 }

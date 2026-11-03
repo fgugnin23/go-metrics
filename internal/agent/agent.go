@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"log"
 	"math/rand"
 	"net/http"
 	"time"
@@ -26,10 +27,14 @@ func (s *agentState) poll() {
 	s.totalPolls += 1
 	s.randomValue.value = rand.NormFloat64()
 
-	collectRuntimeMetrics(s.gauges)
+	err := collectRuntimeMetrics(s.gauges)
+
+	if err != nil {
+		log.Println(err)
+	}
 }
 
-func (s *agentState) report(client http.Client, cfg Config) []error {
+func (s *agentState) report(client http.Client, cfg SenderConfig) []error {
 	var errs []error
 
 	for _, gaugeMetric := range s.gauges {
@@ -51,12 +56,12 @@ func (s *agentState) report(client http.Client, cfg Config) []error {
 	return errs
 }
 
-func shouldReport(pollCount int64, cfg Config) bool {
-	if cfg.PollInterval <= 0 {
+func shouldReport(pollCount int64, pollInterval, reportInterval time.Duration) bool {
+	if pollInterval <= 0 {
 		return true
 	}
 
-	pollsPerReport := int64(cfg.ReportInterval / cfg.PollInterval)
+	pollsPerReport := int64(reportInterval / pollInterval)
 	if pollsPerReport <= 0 {
 		return true
 	}
@@ -64,25 +69,21 @@ func shouldReport(pollCount int64, cfg Config) bool {
 	return pollCount%pollsPerReport == 0
 }
 
-func Run() {
-	RunWithConfig(ArgsConfig())
-}
-
-func RunWithConfig(cfg Config) {
+func RunWithConfig(collectorCfg CollectorConfig, senderCfg SenderConfig) {
 	state := newAgentState()
 	client := http.Client{}
 
 	for {
 		state.poll()
 
-		if shouldReport(state.totalPolls, cfg) {
-			for _, err := range state.report(client, cfg) {
-				println("Ошибка при отправке метрик: ", err.Error())
+		if shouldReport(state.totalPolls, collectorCfg.PollInterval, senderCfg.ReportInterval) {
+			for _, err := range state.report(client, senderCfg) {
+				log.Println("Ошибка при отправке метрик: ", err.Error())
 			}
 
-			println("Метрики отправлены на сервер, опрос произошел: ", state.totalPolls, " раз")
+			log.Println("Метрики отправлены на сервер, опрос произошел: ", state.totalPolls, " раз")
 		}
 
-		time.Sleep(cfg.PollInterval)
+		time.Sleep(collectorCfg.PollInterval)
 	}
 }

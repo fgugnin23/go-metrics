@@ -7,9 +7,11 @@ import (
 	"strings"
 )
 
-var ServerAddr string
-var ReportInterval int64
-var PollInterval int64
+type Config struct {
+	ServerAddr     string
+	ReportInterval int64
+	PollInterval   int64
+}
 
 type serverURL struct {
 	value *string
@@ -46,14 +48,16 @@ func (u serverURL) Set(raw string) error {
 	return nil
 }
 
-func ParseFlags() {
-	addr := serverURL{value: &ServerAddr}
-	if err := addr.Set("localhost:8080"); err != nil {
-		panic(err)
+func ParseFlags(args []string) (Config, error) {
+	cfg := Config{ServerAddr: "http://localhost:8080"}
+	flags := flag.NewFlagSet("agent", flag.ContinueOnError)
+
+	flags.Var(serverURL{value: &cfg.ServerAddr}, "a", "address and port to metrics server")
+	flags.Int64Var(&cfg.ReportInterval, "r", 10, "send metrics to server frequency")
+	flags.Int64Var(&cfg.PollInterval, "p", 2, "poll metrics from runtime frequency")
+	if err := flags.Parse(args); err != nil {
+		return Config{}, err
 	}
 
-	flag.Var(addr, "a", "address and port to metrics server")
-	flag.Int64Var(&ReportInterval, "r", 10, "send metrics to server frequency")
-	flag.Int64Var(&PollInterval, "p", 2, "poll metrics from runtime frequency")
-	flag.Parse()
+	return cfg, nil
 }

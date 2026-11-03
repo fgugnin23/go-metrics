@@ -14,7 +14,7 @@ func TestCollectRuntimeMetrics_FillsKnownNames(t *testing.T) {
 		{name: "Sys"},
 	}
 
-	collectRuntimeMetrics(metrics)
+	assert.NoError(t, collectRuntimeMetrics(metrics))
 
 	require.Len(t, metrics, 3, "длина слайса не должна меняться")
 	assert.Equal(t, "Alloc", metrics[0].name, "порядок не должен меняться")
@@ -27,6 +27,6 @@ func TestCollectRuntimeMetrics_FillsKnownNames(t *testing.T) {
 }
 
 func TestCollectRuntimeMetrics_EmptyInput(t *testing.T) {
-	assert.NotPanics(t, func() { collectRuntimeMetrics(nil) })
-	assert.NotPanics(t, func() { collectRuntimeMetrics([]GaugeMetric{}) })
+	assert.NoError(t, collectRuntimeMetrics(nil))
+	assert.NoError(t, collectRuntimeMetrics([]GaugeMetric{}))
 }

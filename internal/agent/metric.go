@@ -36,6 +36,8 @@ var runtimeGaugeNames = []string{
 	"StackSys",
 	"Sys",
 	"TotalAlloc",
+	"GCSys",
+	"MSpanInuse",
 }
 
 func newRuntimeGauges() []GaugeMetric {
