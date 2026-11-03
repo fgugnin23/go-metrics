@@ -13,14 +13,14 @@ func collectRuntimeMetrics(metrics []GaugeMetric) error {
 	rawMetrics, marshalErr := json.Marshal(*runtimeMemStats)
 
 	if marshalErr != nil {
-		return errors.New("Error when making json from runtime metrics")
+		return errors.New("error when making json from runtime metrics")
 	}
 
 	metricsMap := make(map[string]any)
 	unmarshalErr := json.Unmarshal(rawMetrics, &metricsMap)
 
 	if unmarshalErr != nil {
-		return errors.New("Error when unmarshalling metrics into a map")
+		return errors.New("error when unmarshalling metrics into a map")
 	}
 
 	for i := range metrics {
