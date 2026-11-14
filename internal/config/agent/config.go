@@ -4,7 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+)
+
+const (
+	EnvAddress        = "ADDRESS"
+	EnvReportInterval = "REPORT_INTERVAL"
+	EnvPollInterval   = "POLL_INTERVAL"
 )
 
 type Config struct {
@@ -48,15 +55,37 @@ func (u serverURL) Set(raw string) error {
 	return nil
 }
 
-func ParseFlags(args []string) (Config, error) {
+func Parse(args []string, getenv func(string) string) (Config, error) {
 	cfg := Config{ServerAddr: "http://localhost:8080"}
 	flags := flag.NewFlagSet("agent", flag.ContinueOnError)
 
 	flags.Var(serverURL{value: &cfg.ServerAddr}, "a", "address and port to metrics server")
-	flags.Int64Var(&cfg.ReportInterval, "r", 10, "send metrics to server frequency")
-	flags.Int64Var(&cfg.PollInterval, "p", 2, "poll metrics from runtime frequency")
+	flags.Int64Var(&cfg.ReportInterval, "r", 10, "interval between metric reports in seconds")
+	flags.Int64Var(&cfg.PollInterval, "p", 2, "interval between metric polls in seconds")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
+	}
+
+	if raw := getenv(EnvAddress); raw != "" {
+		if err := (serverURL{value: &cfg.ServerAddr}).Set(raw); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAddress, err)
+		}
+	}
+
+	if raw := getenv(EnvReportInterval); raw != "" {
+		interval, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvReportInterval, err)
+		}
+		cfg.ReportInterval = interval
+	}
+
+	if raw := getenv(EnvPollInterval); raw != "" {
+		interval, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvPollInterval, err)
+		}
+		cfg.PollInterval = interval
 	}
 
 	return cfg, nil
