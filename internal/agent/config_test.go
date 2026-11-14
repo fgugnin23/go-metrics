@@ -15,6 +15,7 @@ func TestArgsConfigs(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
+		env       map[string]string
 		collector CollectorConfig
 		sender    SenderConfig
 	}{
@@ -32,13 +33,27 @@ func TestArgsConfigs(t *testing.T) {
 				ServerBaseURL:  "http://metrics.example:9090",
 			},
 		},
+		{
+			name:      "environment overrides flags in seconds",
+			args:      []string{"-a", "metrics.example:9090", "-p", "3", "-r", "15"},
+			env:       map[string]string{config.EnvAddress: "env.example:9091/", config.EnvReportInterval: "30", config.EnvPollInterval: "5"},
+			collector: CollectorConfig{PollInterval: 5 * time.Second},
+			sender: SenderConfig{
+				ReportInterval: 30 * time.Second,
+				ServerBaseURL:  "http://env.example:9091",
+			},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := config.ParseFlags(test.args)
+			getenv := func(key string) string {
+				return test.env[key]
+			}
+
+			cfg, err := config.Parse(test.args, getenv)
 			require.NoError(t, err)
 
 			assert.Equal(t, test.collector, ArgsCollectorConfig(cfg))

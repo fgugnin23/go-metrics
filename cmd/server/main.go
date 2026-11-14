@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.ParseFlags(os.Args[1:])
+	cfg, err := config.Parse(os.Args[1:], os.Getenv)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
