@@ -3,11 +3,11 @@ package handler
 import (
 	"bytes"
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
 
 	models "github.com/fgugnin23/go-metrics/internal/model"
 )
@@ -20,17 +20,18 @@ type MetricsService interface {
 
 type MetricsHandler struct {
 	service MetricsService
+	logger  zerolog.Logger
 }
 
-func NewMetricsHandler(service MetricsService) MetricsHandler {
-	return MetricsHandler{service: service}
+func NewMetricsHandler(service MetricsService, logger zerolog.Logger) MetricsHandler {
+	return MetricsHandler{service: service, logger: logger}
 }
 
 func (handler MetricsHandler) MainPage(w http.ResponseWriter, _ *http.Request) {
 	var page bytes.Buffer
 
 	if err := renderMetricsPage(&page, newMetricsPageData(handler.service.ListMetrics())); err != nil {
-		log.Println("error when rendering main page: ", err)
+		handler.logger.Info().Err(err).Msg("error when rendering main page")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -64,7 +65,7 @@ func (handler MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := handler.service.UpdateMetric(metric); err != nil {
-		writeServiceError(w, err)
+		handler.writeServiceError(w, err)
 	}
 }
 
@@ -74,7 +75,7 @@ func (handler MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	metric, err := handler.service.GetMetric(metricType, metricName)
 	if err != nil {
-		writeServiceError(w, err)
+		handler.writeServiceError(w, err)
 		return
 	}
 
@@ -92,14 +93,14 @@ func (handler MetricsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(body))
 }
 
-func writeServiceError(w http.ResponseWriter, err error) {
+func (handler MetricsHandler) writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, models.ErrInvalidMetricType), errors.Is(err, models.ErrInvalidMetricValue):
 		w.WriteHeader(http.StatusBadRequest)
 	case errors.Is(err, models.ErrInvalidMetricName), errors.Is(err, models.ErrMetricNotFound):
 		w.WriteHeader(http.StatusNotFound)
 	default:
-		log.Println("unexpected error", err)
+		handler.logger.Info().Err(err).Msg("unexpected service error")
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

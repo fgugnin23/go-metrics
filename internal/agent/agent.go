@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+
+	models "github.com/fgugnin23/go-metrics/internal/model"
 )
 
 type agentState struct {
@@ -38,18 +40,21 @@ func (s *agentState) report(client http.Client, cfg SenderConfig) []error {
 	var errs []error
 
 	for _, gaugeMetric := range s.gauges {
-		if err := sendMetric(client, gaugeURL(cfg.ServerBaseURL, gaugeMetric)); err != nil {
+		metric := models.Metrics{ID: gaugeMetric.name, MType: models.Gauge, Value: &gaugeMetric.value}
+		if err := sendMetric(client, cfg.ServerBaseURL, metric); err != nil {
 			errs = append(errs, err)
 		}
 	}
 
-	if err := sendMetric(client, counterURL(cfg.ServerBaseURL, s.pollCount)); err != nil {
+	pollCount := models.Metrics{ID: s.pollCount.name, MType: models.Counter, Delta: &s.pollCount.value}
+	if err := sendMetric(client, cfg.ServerBaseURL, pollCount); err != nil {
 		errs = append(errs, err)
 	} else {
 		s.pollCount.value = 0
 	}
 
-	if err := sendMetric(client, gaugeURL(cfg.ServerBaseURL, s.randomValue)); err != nil {
+	randomValue := models.Metrics{ID: s.randomValue.name, MType: models.Gauge, Value: &s.randomValue.value}
+	if err := sendMetric(client, cfg.ServerBaseURL, randomValue); err != nil {
 		errs = append(errs, err)
 	}
 
