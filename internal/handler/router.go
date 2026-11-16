@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 )
 
@@ -9,7 +10,7 @@ func NewRouter(service MetricsService, logger zerolog.Logger) *chi.Mux {
 	metrics := NewMetricsHandler(service, logger)
 
 	router := chi.NewRouter()
-	router.Use(requestLogger(logger), recoverer(logger))
+	router.Use(requestLogger(logger), recoverer(logger), middleware.StripSlashes)
 
 	router.Post("/update", metrics.UpdateJSON)
 	router.Post("/value", metrics.GetJSON)

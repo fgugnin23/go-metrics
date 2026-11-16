@@ -65,6 +65,33 @@ func TestJSONMetrics_UpdateAndGet(t *testing.T) {
 	}
 }
 
+func TestJSONMetrics_TrailingSlash(t *testing.T) {
+	for _, suffix := range []string{"/", "/?source=ci"} {
+		t.Run(suffix, func(t *testing.T) {
+			router := NewRouter(service.NewMetricsService(repository.NewMemStorage()), zerolog.Nop())
+			for _, test := range []struct {
+				body   string
+				lookup string
+			}{
+				{`{"id":"Alloc","type":"gauge","value":1.5}`, `{"id":"Alloc","type":"gauge"}`},
+				{`{"id":"PollCount","type":"counter","delta":2}`, `{"id":"PollCount","type":"counter"}`},
+			} {
+				response := postJSON(t, router, "/update"+suffix, test.body)
+				require.Equal(t, http.StatusOK, response.Code)
+				assert.Empty(t, response.Header().Get("Location"), "POST must be handled without a redirect")
+				assert.JSONEq(t, test.body, response.Body.String())
+
+				for _, path := range []string{"/value", "/value" + suffix} {
+					response = postJSON(t, router, path, test.lookup)
+					require.Equal(t, http.StatusOK, response.Code)
+					assert.Empty(t, response.Header().Get("Location"))
+					assert.JSONEq(t, test.body, response.Body.String())
+				}
+			}
+		})
+	}
+}
+
 func TestJSONMetrics_RejectsInvalidRequests(t *testing.T) {
 	tests := []struct {
 		name   string
