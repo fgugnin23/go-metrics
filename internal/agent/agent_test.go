@@ -1,13 +1,13 @@
 package agent
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
+	models "github.com/fgugnin23/go-metrics/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -94,21 +94,23 @@ func TestAgentState_Report_SendsAllMetrics(t *testing.T) {
 
 	require.Empty(t, errs)
 
-	methods, paths := rec.snapshot()
-	assert.Len(t, paths, len(state.gauges)+2, "все gauge + PollCount + RandomValue")
+	requests := rec.snapshot()
+	assert.Len(t, requests, len(state.gauges)+2, "все gauge + PollCount + RandomValue")
 
-	for _, method := range methods {
-		assert.Equal(t, http.MethodPost, method)
+	metrics := make(map[string]models.Metrics)
+	for _, request := range requests {
+		assert.Equal(t, http.MethodPost, request.method)
+		assert.Equal(t, "/update", request.path)
+		assert.Equal(t, "application/json", request.contentType)
+		metrics[request.metric.ID] = request.metric
 	}
-
-	joined := strings.Join(paths, "\n")
-	assert.Contains(t, joined, "/update/counter/PollCount/1")
-	assert.Contains(t, joined, "/update/gauge/RandomValue/")
-	assert.Contains(t, joined, "/update/gauge/Alloc/")
 
 	for _, gauge := range state.gauges {
-		assert.Contains(t, joined, "/update/gauge/"+gauge.name+"/")
+		assert.Equal(t, models.Metrics{ID: gauge.name, MType: models.Gauge, Value: &gauge.value}, metrics[gauge.name])
 	}
+	assert.Equal(t, models.Metrics{ID: "RandomValue", MType: models.Gauge, Value: &state.randomValue.value}, metrics["RandomValue"])
+	delta := int64(1)
+	assert.Equal(t, models.Metrics{ID: "PollCount", MType: models.Counter, Delta: &delta}, metrics["PollCount"])
 }
 
 func TestAgentState_Report_ResetsPollCountDelta(t *testing.T) {
@@ -195,8 +197,7 @@ func TestAgentState_Report_ContinuesAfterError(t *testing.T) {
 
 	require.NotEmpty(t, errs)
 
-	_, paths := rec.snapshot()
-	assert.Len(t, paths, len(state.gauges)+2, "отправка не должна прерываться на первой ошибке")
+	assert.Len(t, rec.snapshot(), len(state.gauges)+2, "отправка не должна прерываться на первой ошибке")
 }
 
 func TestDefaultConfigs(t *testing.T) {
@@ -209,22 +210,13 @@ func TestDefaultConfigs(t *testing.T) {
 }
 
 func pollCountValues(rec *recorder) []int64 {
-	_, paths := rec.snapshot()
-
 	var values []int64
 
-	for _, path := range paths {
-		raw, isPollCount := strings.CutPrefix(path, "/update/counter/PollCount/")
-		if !isPollCount {
-			continue
+	for _, request := range rec.snapshot() {
+		metric := request.metric
+		if metric.ID == "PollCount" && metric.MType == models.Counter && metric.Delta != nil {
+			values = append(values, *metric.Delta)
 		}
-
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			continue
-		}
-
-		values = append(values, value)
 	}
 
 	return values
@@ -241,20 +233,38 @@ func findGauge(gauges []GaugeMetric, name string) (float64, bool) {
 }
 
 type recorder struct {
-	status  int
-	methods []string
-	paths   []string
+	status   int
+	requests []recordedRequest
+}
+
+type recordedRequest struct {
+	method      string
+	path        string
+	contentType string
+	metric      models.Metrics
 }
 
 func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.methods = append(r.methods, req.Method)
-	r.paths = append(r.paths, req.URL.Path)
+	var metric models.Metrics
+	if err := json.NewDecoder(req.Body).Decode(&metric); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
+	r.requests = append(r.requests, recordedRequest{
+		method:      req.Method,
+		path:        req.URL.Path,
+		contentType: req.Header.Get("Content-Type"),
+		metric:      metric,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
 	if r.status != 0 {
 		w.WriteHeader(r.status)
 	}
+	_ = json.NewEncoder(w).Encode(metric)
 }
 
-func (r *recorder) snapshot() (methods, paths []string) {
-	return append([]string(nil), r.methods...), append([]string(nil), r.paths...)
+func (r *recorder) snapshot() []recordedRequest {
+	return append([]recordedRequest(nil), r.requests...)
 }
