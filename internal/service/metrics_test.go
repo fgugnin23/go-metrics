@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	models "github.com/fgugnin23/go-metrics/internal/model"
@@ -125,4 +127,17 @@ func gauge(name string, value float64) models.Metrics {
 
 func counter(name string, value int64) models.Metrics {
 	return models.Metrics{ID: name, MType: models.Counter, Delta: &value}
+}
+
+func TestPeriodicModeDefersSaving(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "metrics.json")
+	file := repository.NewFileStorage(path)
+	service := NewPersistentMetricsService(repository.NewMemStorage(), file, false)
+	require.NoError(t, service.UpdateMetric(counter("count", 42)))
+	_, err := os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.NoError(t, service.Save())
+	saved, err := file.Load()
+	require.NoError(t, err)
+	assert.Equal(t, []models.Metrics{counter("count", 42)}, saved)
 }
