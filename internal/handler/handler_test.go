@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -88,7 +89,7 @@ func TestUpdateMetricsHandle_StatusCodes(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			router := NewRouter(service.NewMetricsService(repository.NewMemStorage()))
+			router := NewRouter(service.NewMetricsService(repository.NewMemStorage()), zerolog.Nop())
 
 			recorder := do(t, router, test.method, test.path)
 
@@ -99,7 +100,7 @@ func TestUpdateMetricsHandle_StatusCodes(t *testing.T) {
 
 func TestUpdateMetricsHandle_StoresValues(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(service.NewMetricsService(storage))
+	router := NewRouter(service.NewMetricsService(storage), zerolog.Nop())
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5").Code)
 
@@ -116,7 +117,7 @@ func TestUpdateMetricsHandle_StoresValues(t *testing.T) {
 
 func TestUpdateMetricsHandle_CounterAccumulates(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(service.NewMetricsService(storage))
+	router := NewRouter(service.NewMetricsService(storage), zerolog.Nop())
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/2").Code)
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/2").Code)
@@ -138,7 +139,7 @@ func TestUpdateMetricsHandle_DoesNotCallServiceOnInvalidValue(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			metrics := &mockService{}
-			router := NewRouter(metrics)
+			router := NewRouter(metrics, zerolog.Nop())
 
 			recorder := do(t, router, http.MethodPost, test.path)
 
@@ -150,7 +151,7 @@ func TestUpdateMetricsHandle_DoesNotCallServiceOnInvalidValue(t *testing.T) {
 
 func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 	metrics := &mockService{updateErr: models.ErrInvalidMetricName}
-	handle := NewMetricsHandler(metrics)
+	handle := NewMetricsHandler(metrics, zerolog.Nop())
 
 	request := withURLParams(
 		httptest.NewRequest(http.MethodPost, "/update/gauge//1", nil),
@@ -166,7 +167,7 @@ func TestUpdateMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 
 func TestUpdateMetricsHandle_UnknownTypeIsBadRequest(t *testing.T) {
 	metrics := &mockService{updateErr: models.ErrInvalidMetricType}
-	recorder := do(t, NewRouter(metrics), http.MethodPost, "/update/unknown/X/1")
+	recorder := do(t, NewRouter(metrics, zerolog.Nop()), http.MethodPost, "/update/unknown/X/1")
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.Equal(t, []models.Metrics{{ID: "X", MType: "unknown"}}, metrics.updateCalls)
@@ -179,7 +180,7 @@ func TestGetMetricsHandle(t *testing.T) {
 	storage.SetGaugeValue("Negative", -0.25)
 	storage.SetCounterValue("PollCount", 3)
 
-	router := NewRouter(service.NewMetricsService(storage))
+	router := NewRouter(service.NewMetricsService(storage), zerolog.Nop())
 
 	tests := []struct {
 		name       string
@@ -214,7 +215,7 @@ func TestGetMetricsHandle(t *testing.T) {
 }
 
 func TestGetMetricsHandle_WrongMethod(t *testing.T) {
-	router := NewRouter(service.NewMetricsService(repository.NewMemStorage()))
+	router := NewRouter(service.NewMetricsService(repository.NewMemStorage()), zerolog.Nop())
 
 	recorder := do(t, router, http.MethodPost, "/value/gauge/Alloc")
 
@@ -222,7 +223,7 @@ func TestGetMetricsHandle_WrongMethod(t *testing.T) {
 }
 
 func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
-	handle := NewMetricsHandler(&mockService{getErr: models.ErrInvalidMetricName})
+	handle := NewMetricsHandler(&mockService{getErr: models.ErrInvalidMetricName}, zerolog.Nop())
 
 	request := withURLParams(
 		httptest.NewRequest(http.MethodGet, "/value/gauge/", nil),
@@ -237,7 +238,7 @@ func TestGetMetricsHandle_EmptyNameIsNotFound(t *testing.T) {
 
 func TestMainPage(t *testing.T) {
 	storage := repository.NewMemStorage()
-	router := NewRouter(service.NewMetricsService(storage))
+	router := NewRouter(service.NewMetricsService(storage), zerolog.Nop())
 
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5").Code)
 	require.Equal(t, http.StatusOK, do(t, router, http.MethodPost, "/update/counter/PollCount/3").Code)
@@ -253,20 +254,20 @@ func TestMainPage(t *testing.T) {
 }
 
 func TestMainPage_EmptyStorage(t *testing.T) {
-	recorder := do(t, NewRouter(&mockService{}), http.MethodGet, "/")
+	recorder := do(t, NewRouter(&mockService{}, zerolog.Nop()), http.MethodGet, "/")
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "<h1>Список всех метрик</h1>")
 }
 
 func TestMainPage_WrongMethod(t *testing.T) {
-	recorder := do(t, NewRouter(&mockService{}), http.MethodPost, "/")
+	recorder := do(t, NewRouter(&mockService{}, zerolog.Nop()), http.MethodPost, "/")
 
 	assert.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
 }
 
 func TestNewRouter_UnknownPath(t *testing.T) {
-	router := NewRouter(&mockService{})
+	router := NewRouter(&mockService{}, zerolog.Nop())
 
 	assert.Equal(t, http.StatusNotFound, do(t, router, http.MethodGet, "/unknown").Code)
 }
@@ -285,7 +286,7 @@ func TestUpdateMetricsHandle_ForwardsMetric(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
 			metrics := &mockService{}
-			recorder := do(t, NewRouter(metrics), http.MethodPost, test.path)
+			recorder := do(t, NewRouter(metrics, zerolog.Nop()), http.MethodPost, test.path)
 
 			assert.Equal(t, http.StatusOK, recorder.Code)
 			assert.Equal(t, []models.Metrics{test.want}, metrics.updateCalls)
@@ -310,7 +311,7 @@ func TestMetricsHandler_ServiceErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			metrics := &mockService{updateErr: test.err, getErr: test.err}
-			router := NewRouter(metrics)
+			router := NewRouter(metrics, zerolog.Nop())
 			update := do(t, router, http.MethodPost, "/update/gauge/Alloc/1.5")
 			get := do(t, router, http.MethodGet, "/value/gauge/Alloc")
 
