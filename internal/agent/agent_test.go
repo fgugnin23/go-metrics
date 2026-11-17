@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -102,6 +103,7 @@ func TestAgentState_Report_SendsAllMetrics(t *testing.T) {
 		assert.Equal(t, http.MethodPost, request.method)
 		assert.Equal(t, "/update", request.path)
 		assert.Equal(t, "application/json", request.contentType)
+		assert.Equal(t, "gzip", request.contentEncoding)
 		metrics[request.metric.ID] = request.metric
 	}
 
@@ -238,24 +240,33 @@ type recorder struct {
 }
 
 type recordedRequest struct {
-	method      string
-	path        string
-	contentType string
-	metric      models.Metrics
+	method          string
+	path            string
+	contentType     string
+	contentEncoding string
+	metric          models.Metrics
 }
 
 func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	reader, err := gzip.NewReader(req.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer reader.Close()
+
 	var metric models.Metrics
-	if err := json.NewDecoder(req.Body).Decode(&metric); err != nil {
+	if err := json.NewDecoder(reader).Decode(&metric); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	r.requests = append(r.requests, recordedRequest{
-		method:      req.Method,
-		path:        req.URL.Path,
-		contentType: req.Header.Get("Content-Type"),
-		metric:      metric,
+		method:          req.Method,
+		path:            req.URL.Path,
+		contentType:     req.Header.Get("Content-Type"),
+		contentEncoding: req.Header.Get("Content-Encoding"),
+		metric:          metric,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

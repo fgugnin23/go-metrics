@@ -10,7 +10,7 @@ func NewRouter(service MetricsService, logger zerolog.Logger) *chi.Mux {
 	metrics := NewMetricsHandler(service, logger)
 
 	router := chi.NewRouter()
-	router.Use(requestLogger(logger), recoverer(logger), middleware.StripSlashes)
+	router.Use(requestLogger(logger), recoverer(logger), gzipMiddleware, middleware.StripSlashes)
 
 	router.Post("/update", metrics.UpdateJSON)
 	router.Post("/value", metrics.GetJSON)

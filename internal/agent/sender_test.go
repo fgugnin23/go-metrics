@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"math"
@@ -19,7 +20,7 @@ import (
 	"github.com/fgugnin23/go-metrics/internal/service"
 )
 
-func TestSendMetric_JSON(t *testing.T) {
+func TestSendMetric_GzipJSON(t *testing.T) {
 	zeroGauge, negativeGauge := 0.0, -0.125
 	zeroCounter, largeCounter := int64(0), int64(math.MaxInt64)
 	tests := []struct {
@@ -41,7 +42,15 @@ func TestSendMetric_JSON(t *testing.T) {
 				assert.Equal(t, "/update", r.URL.Path)
 				assert.Empty(t, r.URL.RawQuery)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-				body, err := io.ReadAll(r.Body)
+				assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+				assert.Equal(t, "gzip", r.Header.Get("Accept-Encoding"))
+				reader, err := gzip.NewReader(r.Body)
+				if !assert.NoError(t, err) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				defer reader.Close()
+				body, err := io.ReadAll(reader)
 				if !assert.NoError(t, err) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
@@ -51,7 +60,11 @@ func TestSendMetric_JSON(t *testing.T) {
 				assert.NoError(t, json.Unmarshal(body, &metric))
 				assert.Equal(t, test.metric, metric)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write(body)
+				w.Header().Set("Content-Encoding", "gzip")
+				writer := gzip.NewWriter(w)
+				_, err = writer.Write(body)
+				assert.NoError(t, err)
+				assert.NoError(t, writer.Close())
 			}))
 			defer server.Close()
 
@@ -68,9 +81,15 @@ func TestSendMetric_RejectsUnencodableValue(t *testing.T) {
 	require.ErrorContains(t, err, "encode metric Invalid")
 }
 
-func TestAgentState_Report_JSONRoundTrip(t *testing.T) {
+func TestAgentState_Report_GzipJSONRoundTrip(t *testing.T) {
 	router := handler.NewRouter(service.NewMetricsService(repository.NewMemStorage()), zerolog.Nop())
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/update" {
+			assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+		}
+		router.ServeHTTP(w, r)
+		assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+	}))
 	defer server.Close()
 
 	state := agentState{
@@ -102,6 +121,7 @@ func TestAgentState_Report_JSONRoundTrip(t *testing.T) {
 		_ = response.Body.Close()
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, response.StatusCode)
+		assert.True(t, response.Uncompressed, "the HTTP client must decompress the server's gzip response")
 		assert.Equal(t, "application/json", response.Header.Get("Content-Type"))
 		assert.JSONEq(t, test.want, string(body))
 	}
