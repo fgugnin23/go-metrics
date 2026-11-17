@@ -19,7 +19,7 @@ import (
 func main() {
 	logger := zerolog.New(os.Stderr).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 
-	cfg, err := config.Parse(os.Args[1:], os.Getenv)
+	cfg, err := config.Parse(os.Args[1:], os.LookupEnv)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -28,20 +28,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	server, err := newServer(cfg, logger)
+	if err != nil {
+		logger.Info().Err(err).Msg("failed to restore metrics")
+		os.Exit(1)
+	}
+	logger.Info().Str("address", cfg.RunAddr).Msg("started server")
+	if err := server.ListenAndServe(); err != nil {
+		logger.Info().Err(err).Msg("server stopped")
+		os.Exit(1)
+	}
+}
+
+func newServer(cfg config.Config, logger zerolog.Logger) (*http.Server, error) {
 	storage := repository.NewMemStorage()
-	metricsService := service.NewMetricsService(storage)
+	file := repository.NewFileStorage(cfg.FileStoragePath)
+	if cfg.Restore {
+		metrics, err := file.Load()
+		if err != nil {
+			return nil, err
+		}
+		if err := storage.Restore(metrics); err != nil {
+			return nil, err
+		}
+	}
+	metricsService := service.NewPersistentMetricsService(storage, file)
 	server := &http.Server{
 		Addr:     cfg.RunAddr,
 		Handler:  handler.NewRouter(metricsService, logger),
 		ErrorLog: log.New(infoLogWriter{logger: logger}, "", 0),
 	}
-
-	logger.Info().Str("address", cfg.RunAddr).Msg("started server")
-	err = server.ListenAndServe()
-	if err != nil {
-		logger.Info().Err(err).Msg("server stopped")
-		os.Exit(1)
-	}
+	return server, nil
 }
 
 type infoLogWriter struct {

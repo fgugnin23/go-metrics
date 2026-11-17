@@ -11,12 +11,28 @@ type Storage interface {
 	GetCounterMetrics() map[string]int64
 }
 
+type SnapshotWriter interface {
+	Save([]models.Metrics) error
+}
+
 type MetricsService struct {
 	storage Storage
+	writer  SnapshotWriter
 }
 
 func NewMetricsService(storage Storage) *MetricsService {
 	return &MetricsService{storage: storage}
+}
+
+func NewPersistentMetricsService(storage Storage, writer SnapshotWriter) *MetricsService {
+	return &MetricsService{storage: storage, writer: writer}
+}
+
+func (service *MetricsService) Save() error {
+	if service.writer == nil {
+		return nil
+	}
+	return service.writer.Save(service.ListMetrics())
 }
 
 func (service *MetricsService) UpdateMetric(metric models.Metrics) error {
@@ -37,7 +53,7 @@ func (service *MetricsService) UpdateMetric(metric models.Metrics) error {
 		service.storage.SetCounterValue(metric.ID, *metric.Delta)
 	}
 
-	return nil
+	return service.Save()
 }
 
 func (service *MetricsService) GetMetric(metricType, name string) (models.Metrics, error) {
