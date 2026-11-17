@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -52,13 +53,25 @@ func newServer(cfg config.Config, logger zerolog.Logger) (*http.Server, error) {
 			return nil, err
 		}
 	}
-	metricsService := service.NewPersistentMetricsService(storage, file)
+	metricsService := service.NewPersistentMetricsService(storage, file, cfg.StoreInterval == 0)
 	server := &http.Server{
 		Addr:     cfg.RunAddr,
 		Handler:  handler.NewRouter(metricsService, logger),
 		ErrorLog: log.New(infoLogWriter{logger: logger}, "", 0),
 	}
+	if cfg.StoreInterval > 0 {
+		go savePeriodically(cfg.StoreInterval, metricsService.Save, logger)
+	}
 	return server, nil
+}
+
+func savePeriodically(interval time.Duration, save func() error, logger zerolog.Logger) {
+	for {
+		time.Sleep(interval)
+		if err := save(); err != nil {
+			logger.Info().Err(err).Msg("failed to save metrics; will retry after the interval")
+		}
+	}
 }
 
 type infoLogWriter struct {

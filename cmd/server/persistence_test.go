@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	config "github.com/fgugnin23/go-metrics/internal/config/server"
 	"github.com/rs/zerolog"
@@ -77,4 +80,50 @@ func TestServerSavesAfterUpdate(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.JSONEq(t, `[{"id":"count","type":"counter","delta":42}]`, string(data))
+}
+
+func TestPeriodicPersistence(t *testing.T) {
+	if os.Getenv("METRICS_PERIODIC_TEST") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestPeriodicPersistence$", "-test.timeout=5s")
+		cmd.Env = append(os.Environ(), "METRICS_PERIODIC_TEST=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metrics.json")
+	// Force the first save to fail, then make the destination writable.
+	require.NoError(t, os.Mkdir(path, 0700))
+	logPath := filepath.Join(dir, "server.log")
+	logFile, err := os.Create(logPath)
+	require.NoError(t, err)
+	defer logFile.Close()
+	_, err = newServer(config.Config{FileStoragePath: path, StoreInterval: 20 * time.Millisecond}, zerolog.New(logFile))
+	require.NoError(t, err)
+	waitFor := func(check func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if check() {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("timed out waiting for periodic save")
+	}
+	waitFor(func() bool {
+		data, _ := os.ReadFile(logPath)
+		return strings.Contains(string(data), "failed to save metrics")
+	})
+	require.NoError(t, os.Remove(path))
+	waitFor(func() bool {
+		data, err := os.ReadFile(path)
+		return err == nil && string(data) == "[]"
+	})
+
+	require.NoError(t, os.Remove(path))
+	waitFor(func() bool {
+		data, err := os.ReadFile(path)
+		return err == nil && string(data) == "[]"
+	})
 }

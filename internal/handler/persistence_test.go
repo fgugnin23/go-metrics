@@ -25,7 +25,7 @@ func TestUpdatesSaveBeforeResponse(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "metrics.json")
 			file := repository.NewFileStorage(path)
-			metrics := service.NewPersistentMetricsService(repository.NewMemStorage(), file)
+			metrics := service.NewPersistentMetricsService(repository.NewMemStorage(), file, true)
 			router := NewRouter(metrics, zerolog.Nop())
 			update := func(kind, value string) *httptest.ResponseRecorder {
 				url := "/update/" + kind + "/metric/" + value

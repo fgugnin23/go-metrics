@@ -27,7 +27,7 @@ func Parse(args []string, lookupEnv func(string) (string, bool)) (Config, error)
 	var seconds int64
 	flags := flag.NewFlagSet("server", flag.ContinueOnError)
 	flags.StringVar(&cfg.RunAddr, "a", "localhost:8080", "address and port to run server")
-	flags.Int64Var(&seconds, "i", 300, "storage interval in seconds (reserved; currently saves after every update)")
+	flags.Int64Var(&seconds, "i", 300, "storage interval in seconds (0 saves after every update)")
 	flags.StringVar(&cfg.FileStoragePath, "f", "metrics.json", "metrics storage file")
 	flags.BoolVar(&cfg.Restore, "r", true, "restore metrics from file at startup")
 	if err := flags.Parse(args); err != nil {
